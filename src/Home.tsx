@@ -6,7 +6,6 @@ import {
   Container,
   FileInput,
   Flex,
-  Group,
   List,
   ListItem,
   Loader,
@@ -30,7 +29,7 @@ type FormProps = {
   error: string | null;
   downloading: boolean;
 };
-const [FormProvider, useFormContext, useForm] = createFormContext<FormProps>();
+const [FormProvider, _useFormContext, useForm] = createFormContext<FormProps>();
 
 // これらは絶対消さない！！！
 window.process = window.process || {};
@@ -96,7 +95,7 @@ export default function Home() {
     } catch (e) {
       console.error('EPUB parsing error:', e);
       form.setValues({
-        error: 'EPUBファイルのパースに失敗しました。',
+        error: 'EPUBファイルのロードに失敗しました。',
         toc: [],
         selectedTocIds: []
       });
@@ -206,7 +205,7 @@ export default function Home() {
 
       if (combinedText.trim().length === 0) {
         form.setValues({
-          error: '選択された目次のテキストコンテンツが見つかりませんでした。',
+          error: '選択された目次のテキストが見つかりませんでした。',
           downloading: false
         });
         return;
@@ -231,12 +230,12 @@ export default function Home() {
   };
 
   return (
-    <Container maw={600} py='md'>
+    <Container maw={600} py='md' mb={'xl'}>
       <Title mt={'sm'} order={2}>
         EPUBテキスト変換ツール
       </Title>
       <Title order={6} mb={'sm'} c={'dimmed'}>
-        目次から選択した章だけダウンロードできます。
+        EPUBのテキストを章ごとにまとめてダウンロードできます。
       </Title>
       <FileInput
         label='EPUBファイルを選択'
@@ -278,7 +277,7 @@ export default function Home() {
 
           <Space h='md' />
 
-          <Group>
+          <Flex justify='center' align='center'>
             <Button
               onClick={handleDownload}
               disabled={form.values.selectedTocIds.length === 0 || form.values.downloading}
@@ -287,7 +286,7 @@ export default function Home() {
             >
               選択したテキストをダウンロード
             </Button>
-          </Group>
+          </Flex>
         </FormProvider>
       )}
     </Container>

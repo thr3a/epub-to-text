@@ -35,6 +35,14 @@ const [FormProvider, _useFormContext, useForm] = createFormContext<FormProps>();
 window.process = window.process || {};
 window.process.cwd = () => '/';
 
+function Notice() {
+  return (
+    <Alert variant='light' color='blue' title='ご安心ください' mb={'md'}>
+      EPUBのロード処理はすべてブラウザ内のみで行われます。 選択したファイルが外部に送信されることはありません。
+    </Alert>
+  );
+}
+
 export default function Home() {
   // epubInstanceのみrefで管理
   const epubInstance = useRef<EpubInstance | null>(null);
@@ -230,13 +238,16 @@ export default function Home() {
   };
 
   return (
-    <Container maw={600} py='md' mb={'xl'}>
+    <Container maw={600} mb={'xl'}>
       <Title mt={'sm'} order={2}>
         EPUBテキスト変換ツール
       </Title>
       <Title order={6} mb={'sm'} c={'dimmed'}>
         EPUBのテキストを章ごとにまとめてダウンロードできます。
       </Title>
+
+      <Notice />
+
       <FileInput
         label='EPUBファイルを選択'
         placeholder='ここをクリックしてファイルを選択'

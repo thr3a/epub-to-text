@@ -1,88 +1,135 @@
 import { initEpubFile } from '@lingo-reader/epub-parser';
 import { Alert, Button, Checkbox, Container, FileInput, Group, List, ListItem, Loader, Title } from '@mantine/core';
+import { createFormContext } from '@mantine/form';
 import { IconAlertCircle, IconDownload } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
 // Epub型をinitEpubFileの返り値の型として定義
 type EpubInstance = Awaited<ReturnType<typeof initEpubFile>>;
-// TocItem型をEpubInstance['getToc']の返り値の配列要素の型として定義
 type TocItem = ReturnType<EpubInstance['getToc']>[number];
+
+// Mantine form context
+type FormProps = {
+  selectedFile: File | null;
+  toc: TocItem[];
+  selectedTocIds: string[];
+  loading: boolean;
+  error: string | null;
+  downloading: boolean;
+};
+const [FormProvider, useFormContext, useForm] = createFormContext<FormProps>();
 
 // これらは絶対消さない！！！
 window.process = window.process || {};
 window.process.cwd = () => '/';
 
 export default function Home() {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [epubInstance, setEpubInstance] = useState<EpubInstance | null>(null);
-  const [toc, setToc] = useState<TocItem[]>([]);
-  const [selectedTocIds, setSelectedTocIds] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [downloading, setDownloading] = useState(false);
+  // epubInstanceのみrefで管理
+  const epubInstance = useRef<EpubInstance | null>(null);
+
+  // Mantine useFormで全て管理
+  const form = useForm({
+    mode: 'controlled',
+    initialValues: {
+      selectedFile: null as File | null,
+      toc: [] as TocItem[],
+      selectedTocIds: [] as string[],
+      loading: false,
+      error: null as string | null,
+      downloading: false
+    }
+  });
 
   // epubインスタンスのクリーンアップ
   useEffect(() => {
     return () => {
-      epubInstance?.destroy();
+      epubInstance.current?.destroy();
     };
-  }, [epubInstance]);
+  }, []);
 
+  // 目次取得時に全選択
   const handleFileChange = async (file: File | null) => {
-    setSelectedFile(file);
-    setSelectedTocIds([]); // ファイルが変わったら選択状態をリセット
-    if (epubInstance) {
-      epubInstance.destroy();
-      setEpubInstance(null);
+    form.setValues({
+      selectedFile: file,
+      selectedTocIds: []
+    });
+    if (epubInstance.current) {
+      epubInstance.current.destroy();
+      epubInstance.current = null;
     }
 
     if (!file) {
-      setToc([]);
-      setError(null);
+      form.setValues({
+        toc: [],
+        error: null
+      });
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    setToc([]);
+    form.setValues({
+      loading: true,
+      error: null,
+      toc: []
+    });
 
     try {
       const newEpubInstance = await initEpubFile(file);
-      setEpubInstance(newEpubInstance);
+      epubInstance.current = newEpubInstance;
       const tocItems = newEpubInstance.getToc();
-      setToc(tocItems);
+      form.setValues({
+        toc: tocItems,
+        selectedTocIds: tocItems.map((item) => item.id)
+      });
     } catch (e) {
       console.error('EPUB parsing error:', e);
-      setError('EPUBファイルのパースに失敗しました。');
-      setEpubInstance(null); // エラー時はインスタンスをnullに
-      setToc([]);
+      form.setValues({
+        error: 'EPUBファイルのパースに失敗しました。',
+        toc: [],
+        selectedTocIds: []
+      });
+      epubInstance.current = null;
     } finally {
-      setLoading(false);
+      form.setFieldValue('loading', false);
+    }
+  };
+
+  // 一括ON/OFF
+  const handleToggleAll = () => {
+    const toc = form.values.toc;
+    if (form.values.selectedTocIds.length === toc.length) {
+      form.setFieldValue('selectedTocIds', []);
+    } else {
+      form.setFieldValue(
+        'selectedTocIds',
+        toc.map((item) => item.id)
+      );
     }
   };
 
   const handleDownload = async () => {
-    if (!epubInstance || selectedTocIds.length === 0) return;
+    if (!epubInstance.current || form.values.selectedTocIds.length === 0) return;
 
-    setDownloading(true);
-    setError(null); // ダウンロード試行前にエラーをクリア
+    form.setFieldValue('downloading', true);
+    form.setFieldValue('error', null);
 
     try {
       let combinedText = '';
       const parser = new DOMParser();
 
-      for (const id of selectedTocIds) {
-        const chapter = await epubInstance.loadChapter(id);
+      for (const id of form.values.selectedTocIds) {
+        const chapter = await epubInstance.current.loadChapter(id);
         if (chapter?.html) {
           const doc = parser.parseFromString(chapter.html, 'text/html');
           const textContent = doc.body.textContent || '';
-          combinedText += `${textContent.trim()}\n\n`; // 章の間に空行を挿入
+          combinedText += `${textContent.trim()}\n\n`;
         }
       }
 
       if (combinedText.trim().length === 0) {
-        setError('選択された目次のテキストコンテンツが見つかりませんでした。');
-        setDownloading(false);
+        form.setValues({
+          error: '選択された目次のテキストコンテンツが見つかりませんでした。',
+          downloading: false
+        });
         return;
       }
 
@@ -90,7 +137,7 @@ export default function Home() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      const fileName = selectedFile?.name?.replace(/\.epub$/i, '') || 'content';
+      const fileName = form.values.selectedFile?.name?.replace(/\.epub$/i, '') || 'content';
       link.download = `${fileName}.txt`;
       document.body.appendChild(link);
       link.click();
@@ -98,9 +145,9 @@ export default function Home() {
       URL.revokeObjectURL(url);
     } catch (e) {
       console.error('Download error:', e);
-      setError('テキストのダウンロード中にエラーが発生しました。');
+      form.setFieldValue('error', 'テキストのダウンロード中にエラーが発生しました。');
     } finally {
-      setDownloading(false);
+      form.setFieldValue('downloading', false);
     }
   };
 
@@ -114,53 +161,58 @@ export default function Home() {
         label='EPUBファイルを選択'
         placeholder='ここをクリックしてファイルを選択'
         accept='.epub'
-        value={selectedFile}
+        value={form.values.selectedFile}
         onChange={handleFileChange}
         clearable
         mb='md'
       />
 
-      {loading && <Loader mt='md' />}
+      {form.values.loading && <Loader mt='md' />}
 
-      {error && (
+      {form.values.error && (
         <Alert
           icon={<IconAlertCircle size='1rem' />}
           title='エラー'
           color='red'
           mt='md'
           withCloseButton
-          onClose={() => setError(null)}
+          onClose={() => form.setFieldValue('error', null)}
         >
-          {error}
+          {form.values.error}
         </Alert>
       )}
 
-      {toc.length > 0 && !loading && (
-        <div style={{ marginTop: '20px' }}>
-          <Title order={4} mb='sm'>
-            目次
-          </Title>
-          <Checkbox.Group value={selectedTocIds} onChange={setSelectedTocIds}>
-            <List spacing='xs' size='sm' listStyleType='none'>
-              {toc.map((item) => (
-                <ListItem key={item.id}>
-                  <Checkbox value={item.id} label={item.label} />
-                </ListItem>
-              ))}
-            </List>
-          </Checkbox.Group>
-
-          <Group mt='md'>
-            <Button
-              onClick={handleDownload}
-              disabled={selectedTocIds.length === 0 || downloading}
-              leftSection={<IconDownload size={14} />}
-              loading={downloading}
-            >
-              選択した目次をダウンロード
+      {form.values.toc.length > 0 && !form.values.loading && (
+        <FormProvider form={form}>
+          <div style={{ marginTop: '20px' }}>
+            <Title order={4} mb='sm'>
+              目次
+            </Title>
+            <Button size='xs' variant='light' onClick={handleToggleAll} mb='xs' style={{ float: 'right' }}>
+              {form.values.selectedTocIds.length === form.values.toc.length ? '全解除' : '全選択'}
             </Button>
-          </Group>
-        </div>
+            <Checkbox.Group {...form.getInputProps('selectedTocIds')}>
+              <List spacing='xs' size='sm' listStyleType='none'>
+                {form.values.toc.map((item: TocItem) => (
+                  <ListItem key={item.id}>
+                    <Checkbox value={item.id} label={item.label} />
+                  </ListItem>
+                ))}
+              </List>
+            </Checkbox.Group>
+
+            <Group mt='md'>
+              <Button
+                onClick={handleDownload}
+                disabled={form.values.selectedTocIds.length === 0 || form.values.downloading}
+                leftSection={<IconDownload size={14} />}
+                loading={form.values.downloading}
+              >
+                選択した目次をダウンロード
+              </Button>
+            </Group>
+          </div>
+        </FormProvider>
       )}
     </Container>
   );

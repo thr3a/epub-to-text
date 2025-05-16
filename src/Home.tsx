@@ -1,5 +1,18 @@
 import { initEpubFile } from '@lingo-reader/epub-parser';
-import { Alert, Button, Checkbox, Container, FileInput, Group, List, ListItem, Loader, Title } from '@mantine/core';
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Container,
+  FileInput,
+  Flex,
+  Group,
+  List,
+  ListItem,
+  Loader,
+  Space,
+  Title
+} from '@mantine/core';
 import { createFormContext } from '@mantine/form';
 import { IconAlertCircle, IconDownload } from '@tabler/icons-react';
 import { useEffect, useRef } from 'react';
@@ -31,11 +44,11 @@ export default function Home() {
   const form = useForm({
     mode: 'controlled',
     initialValues: {
-      selectedFile: null as File | null,
-      toc: [] as TocItem[],
-      selectedTocIds: [] as string[],
+      selectedFile: null,
+      toc: [],
+      selectedTocIds: [],
       loading: false,
-      error: null as string | null,
+      error: null,
       downloading: false
     }
   });
@@ -115,15 +128,81 @@ export default function Home() {
     try {
       let combinedText = '';
       const parser = new DOMParser();
+      const epub = epubInstance.current;
+      if (!epub) return;
 
-      for (const id of form.values.selectedTocIds) {
-        const chapter = await epubInstance.current.loadChapter(id);
-        if (chapter?.html) {
-          const doc = parser.parseFromString(chapter.html, 'text/html');
-          const textContent = doc.body.textContent || '';
-          combinedText += `${textContent.trim()}\n\n`;
+      const spine = epub.getSpine();
+      const tocItems = epub.getToc();
+      const tocMap = new Map(tocItems.map((item) => [item.id, item]));
+
+      // 選択された目次IDに対応する章のテキストを収集
+      const chapterTexts: { title: string; text: string }[] = [];
+
+      // HTMLコンテンツをプレーンテキストに変換するヘルパー関数
+      const htmlToText = (html: string): string => {
+        const doc = parser.parseFromString(html, 'text/html');
+        return doc.body.textContent?.trim() || '';
+      };
+
+      // spineを順番に処理して、選択された目次の章のテキストを抽出
+      let currentSelectedChapterTitle: string | null = null;
+      let currentChapterAggregatedText = '';
+
+      for (const spineItem of spine) {
+        const tocItemForSpine = tocMap.get(spineItem.id);
+        const chapterTitle = tocItemForSpine?.label?.trim();
+
+        // 目次ラベルがあり、かつ選択されているIDの場合、新しい章の開始とみなす
+        if (chapterTitle && form.values.selectedTocIds.includes(spineItem.id)) {
+          // 前の章のテキストがあれば保存
+          if (currentSelectedChapterTitle && currentChapterAggregatedText.trim().length > 0) {
+            chapterTexts.push({ title: currentSelectedChapterTitle, text: currentChapterAggregatedText.trim() });
+          }
+          // 新しい章の開始
+          currentSelectedChapterTitle = chapterTitle;
+          const chapterData = await epub.loadChapter(spineItem.id);
+          currentChapterAggregatedText = chapterData?.html ? `${htmlToText(chapterData.html)}\n` : '';
+        } else if (currentSelectedChapterTitle) {
+          // 新しいタイトル（選択されているか否かにかかわらず）が現れたら、
+          // それが選択されたタイトルでなければ、現在の章のテキスト収集を終了する。
+          if (
+            chapterTitle &&
+            chapterTitle !== currentSelectedChapterTitle &&
+            form.values.selectedTocIds.includes(spineItem.id)
+          ) {
+            // これは新しい選択された章なので、上のifブロックで処理されるはず
+          } else if (
+            chapterTitle &&
+            chapterTitle !== currentSelectedChapterTitle &&
+            !form.values.selectedTocIds.includes(spineItem.id)
+          ) {
+            // 新しいタイトルだが、選択されていない章なので、現在の章のテキスト収集をここで一旦区切る
+            // （ただし、このspineのテキスト自体は含めない）
+            if (currentSelectedChapterTitle && currentChapterAggregatedText.trim().length > 0) {
+              chapterTexts.push({ title: currentSelectedChapterTitle, text: currentChapterAggregatedText.trim() });
+            }
+            currentSelectedChapterTitle = null; // 現在の章の収集をリセット
+            currentChapterAggregatedText = '';
+          } else if (currentSelectedChapterTitle) {
+            // タイトルが変わらないか、タイトルがないspine
+            const chapterData = await epub.loadChapter(spineItem.id);
+            if (chapterData?.html) {
+              const text = htmlToText(chapterData.html);
+              if (text.length > 0) {
+                currentChapterAggregatedText += `${text}\n`;
+              }
+            }
+          }
         }
       }
+
+      // 最後の章のテキストを保存
+      if (currentSelectedChapterTitle && currentChapterAggregatedText.trim().length > 0) {
+        chapterTexts.push({ title: currentSelectedChapterTitle, text: currentChapterAggregatedText.trim() });
+      }
+
+      // 収集したテキストを結合
+      combinedText = chapterTexts.map((ct) => `--- ${ct.title} ---\n${ct.text}`).join('\n\n');
 
       if (combinedText.trim().length === 0) {
         form.setValues({
@@ -153,10 +232,12 @@ export default function Home() {
 
   return (
     <Container maw={600} py='md'>
-      <Title order={2} mb='md'>
-        EPUBリーダー
+      <Title mt={'sm'} order={2}>
+        EPUBテキスト変換ツール
       </Title>
-
+      <Title order={6} mb={'sm'} c={'dimmed'}>
+        目次から選択した章だけダウンロードできます。
+      </Title>
       <FileInput
         label='EPUBファイルを選択'
         placeholder='ここをクリックしてファイルを選択'
@@ -164,54 +245,49 @@ export default function Home() {
         value={form.values.selectedFile}
         onChange={handleFileChange}
         clearable
-        mb='md'
       />
-
-      {form.values.loading && <Loader mt='md' />}
-
+      <Space h='md' />
+      {form.values.loading && <Loader />}
       {form.values.error && (
-        <Alert
-          icon={<IconAlertCircle size='1rem' />}
-          title='エラー'
-          color='red'
-          mt='md'
-          withCloseButton
-          onClose={() => form.setFieldValue('error', null)}
-        >
+        <Alert icon={<IconAlertCircle />} title='エラー' color='red'>
           {form.values.error}
         </Alert>
       )}
+      <Space h='md' />
 
       {form.values.toc.length > 0 && !form.values.loading && (
         <FormProvider form={form}>
-          <div style={{ marginTop: '20px' }}>
-            <Title order={4} mb='sm'>
-              目次
-            </Title>
-            <Button size='xs' variant='light' onClick={handleToggleAll} mb='xs' style={{ float: 'right' }}>
+          <Flex justify='space-between'>
+            <Title order={4}>目次</Title>
+            <Button size='xs' variant='light' onClick={handleToggleAll}>
               {form.values.selectedTocIds.length === form.values.toc.length ? '全解除' : '全選択'}
             </Button>
-            <Checkbox.Group {...form.getInputProps('selectedTocIds')}>
-              <List spacing='xs' size='sm' listStyleType='none'>
-                {form.values.toc.map((item: TocItem) => (
-                  <ListItem key={item.id}>
-                    <Checkbox value={item.id} label={item.label} />
-                  </ListItem>
-                ))}
-              </List>
-            </Checkbox.Group>
+          </Flex>
 
-            <Group mt='md'>
-              <Button
-                onClick={handleDownload}
-                disabled={form.values.selectedTocIds.length === 0 || form.values.downloading}
-                leftSection={<IconDownload size={14} />}
-                loading={form.values.downloading}
-              >
-                選択した目次をダウンロード
-              </Button>
-            </Group>
-          </div>
+          <Space h='sm' />
+
+          <Checkbox.Group {...form.getInputProps('selectedTocIds')}>
+            <List spacing='xs' size='sm' listStyleType='none'>
+              {form.values.toc.map((item: TocItem) => (
+                <ListItem key={item.id}>
+                  <Checkbox value={item.id} label={item.label} />
+                </ListItem>
+              ))}
+            </List>
+          </Checkbox.Group>
+
+          <Space h='md' />
+
+          <Group>
+            <Button
+              onClick={handleDownload}
+              disabled={form.values.selectedTocIds.length === 0 || form.values.downloading}
+              leftSection={<IconDownload size={18} />}
+              loading={form.values.downloading}
+            >
+              選択したテキストをダウンロード
+            </Button>
+          </Group>
         </FormProvider>
       )}
     </Container>

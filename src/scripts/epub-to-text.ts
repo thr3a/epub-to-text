@@ -73,7 +73,7 @@ function saveChapterToFile(
   const safeTitle = sanitizeFilename(title);
   // インデックスを2桁のゼロ埋めでフォーマット
   const formattedIndex = index.toString().padStart(2, '0');
-  const outPath = path.join(outputDir, `${baseFilename}-${formattedIndex}.txt`);
+  const outPath = path.join(outputDir, `${baseFilename}-${formattedIndex}-${safeTitle}.txt`);
   fs.writeFileSync(outPath, content.trim(), 'utf-8');
   console.log(`saved: ${outPath}`);
 }

@@ -12,3 +12,12 @@
 - UI: React v19 Mantine v7
 - hook: mantine hook
 - lint: biome
+
+
+epubを選択したらパースして目次が表示され、任意の目次をチェックボックスで選択して
+ダウンロードボタンをクリックすると、その中身のテキストを結合してダウンロードできるサイトを作りたい
+まずはepubを選択したら目次が一覧で表示されるところまでを実装して
+
+@lingo-reader/epub-parserを使う
+src/scripts/epub-to-text.tsを参考にすること
+/にアクセスしたらそこにmantineフォームがある感じ　src/Home.tsxに実装して良い

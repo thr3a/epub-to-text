@@ -19,6 +19,7 @@ import { useEffect, useRef } from 'react';
 // Epub型をinitEpubFileの返り値の型として定義
 type EpubInstance = Awaited<ReturnType<typeof initEpubFile>>;
 type TocItem = ReturnType<EpubInstance['getToc']>[number];
+type ChapterText = { title: string; text: string };
 
 // Mantine form context
 type FormProps = {
@@ -34,6 +35,27 @@ const [FormProvider, _useFormContext, useForm] = createFormContext<FormProps>();
 // これらは絶対消さない！！！
 window.process = window.process || {};
 window.process.cwd = () => '/';
+
+const sanitizeFileName = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return 'chapter';
+  return trimmed
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .slice(0, 120);
+};
+
+const downloadTextFile = (fileName: string, content: string) => {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
 
 function Notice() {
   return (
@@ -126,6 +148,61 @@ export default function Home() {
     }
   };
 
+  const extractSelectedChapterTexts = async (epub: EpubInstance, selectedTocIds: string[]) => {
+    const parser = new DOMParser();
+    const spine = epub.getSpine();
+    const tocItems = epub.getToc();
+    const tocMap = new Map(tocItems.map((item) => [item.id, item]));
+
+    const htmlToText = (html: string): string => {
+      const doc = parser.parseFromString(html, 'text/html');
+      return doc.body.textContent?.trim() || '';
+    };
+
+    const chapterTexts: ChapterText[] = [];
+
+    let currentSelectedChapterTitle: string | null = null;
+    let currentChapterAggregatedText = '';
+
+    for (const spineItem of spine) {
+      const tocItemForSpine = tocMap.get(spineItem.id);
+      const chapterTitle = tocItemForSpine?.label?.trim();
+
+      if (chapterTitle && selectedTocIds.includes(spineItem.id)) {
+        if (currentSelectedChapterTitle && currentChapterAggregatedText.trim().length > 0) {
+          chapterTexts.push({ title: currentSelectedChapterTitle, text: currentChapterAggregatedText.trim() });
+        }
+        currentSelectedChapterTitle = chapterTitle;
+        const chapterData = await epub.loadChapter(spineItem.id);
+        currentChapterAggregatedText = chapterData?.html ? `${htmlToText(chapterData.html)}\n` : '';
+        continue;
+      }
+
+      if (!currentSelectedChapterTitle) continue;
+
+      if (chapterTitle && chapterTitle !== currentSelectedChapterTitle && !selectedTocIds.includes(spineItem.id)) {
+        if (currentChapterAggregatedText.trim().length > 0) {
+          chapterTexts.push({ title: currentSelectedChapterTitle, text: currentChapterAggregatedText.trim() });
+        }
+        currentSelectedChapterTitle = null;
+        currentChapterAggregatedText = '';
+        continue;
+      }
+
+      const chapterData = await epub.loadChapter(spineItem.id);
+      if (!chapterData?.html) continue;
+      const text = htmlToText(chapterData.html);
+      if (text.length === 0) continue;
+      currentChapterAggregatedText += `${text}\n`;
+    }
+
+    if (currentSelectedChapterTitle && currentChapterAggregatedText.trim().length > 0) {
+      chapterTexts.push({ title: currentSelectedChapterTitle, text: currentChapterAggregatedText.trim() });
+    }
+
+    return chapterTexts;
+  };
+
   const handleDownload = async () => {
     if (!epubInstance.current || form.values.selectedTocIds.length === 0) return;
 
@@ -133,85 +210,16 @@ export default function Home() {
     form.setFieldValue('error', null);
 
     try {
-      let combinedText = '';
-      const parser = new DOMParser();
       const epub = epubInstance.current;
       if (!epub) return;
 
-      const spine = epub.getSpine();
-      const tocItems = epub.getToc();
-      const tocMap = new Map(tocItems.map((item) => [item.id, item]));
+      const chapterTexts = await extractSelectedChapterTexts(epub, form.values.selectedTocIds);
+      const combinedText = chapterTexts
+        .map((ct) => `--- ${ct.title} ---\n${ct.text}`)
+        .join('\n\n')
+        .trim();
 
-      // 選択された目次IDに対応する章のテキストを収集
-      const chapterTexts: { title: string; text: string }[] = [];
-
-      // HTMLコンテンツをプレーンテキストに変換するヘルパー関数
-      const htmlToText = (html: string): string => {
-        const doc = parser.parseFromString(html, 'text/html');
-        return doc.body.textContent?.trim() || '';
-      };
-
-      // spineを順番に処理して、選択された目次の章のテキストを抽出
-      let currentSelectedChapterTitle: string | null = null;
-      let currentChapterAggregatedText = '';
-
-      for (const spineItem of spine) {
-        const tocItemForSpine = tocMap.get(spineItem.id);
-        const chapterTitle = tocItemForSpine?.label?.trim();
-
-        // 目次ラベルがあり、かつ選択されているIDの場合、新しい章の開始とみなす
-        if (chapterTitle && form.values.selectedTocIds.includes(spineItem.id)) {
-          // 前の章のテキストがあれば保存
-          if (currentSelectedChapterTitle && currentChapterAggregatedText.trim().length > 0) {
-            chapterTexts.push({ title: currentSelectedChapterTitle, text: currentChapterAggregatedText.trim() });
-          }
-          // 新しい章の開始
-          currentSelectedChapterTitle = chapterTitle;
-          const chapterData = await epub.loadChapter(spineItem.id);
-          currentChapterAggregatedText = chapterData?.html ? `${htmlToText(chapterData.html)}\n` : '';
-        } else if (currentSelectedChapterTitle) {
-          // 新しいタイトル（選択されているか否かにかかわらず）が現れたら、
-          // それが選択されたタイトルでなければ、現在の章のテキスト収集を終了する。
-          if (
-            chapterTitle &&
-            chapterTitle !== currentSelectedChapterTitle &&
-            form.values.selectedTocIds.includes(spineItem.id)
-          ) {
-            // これは新しい選択された章なので、上のifブロックで処理されるはず
-          } else if (
-            chapterTitle &&
-            chapterTitle !== currentSelectedChapterTitle &&
-            !form.values.selectedTocIds.includes(spineItem.id)
-          ) {
-            // 新しいタイトルだが、選択されていない章なので、現在の章のテキスト収集をここで一旦区切る
-            // （ただし、このspineのテキスト自体は含めない）
-            if (currentSelectedChapterTitle && currentChapterAggregatedText.trim().length > 0) {
-              chapterTexts.push({ title: currentSelectedChapterTitle, text: currentChapterAggregatedText.trim() });
-            }
-            currentSelectedChapterTitle = null; // 現在の章の収集をリセット
-            currentChapterAggregatedText = '';
-          } else if (currentSelectedChapterTitle) {
-            // タイトルが変わらないか、タイトルがないspine
-            const chapterData = await epub.loadChapter(spineItem.id);
-            if (chapterData?.html) {
-              const text = htmlToText(chapterData.html);
-              if (text.length > 0) {
-                currentChapterAggregatedText += `${text}\n`;
-              }
-            }
-          }
-        }
-      }
-
-      // 最後の章のテキストを保存
-      if (currentSelectedChapterTitle && currentChapterAggregatedText.trim().length > 0) {
-        chapterTexts.push({ title: currentSelectedChapterTitle, text: currentChapterAggregatedText.trim() });
-      }
-
-      // 収集したテキストを結合
-      combinedText = chapterTexts.map((ct) => `--- ${ct.title} ---\n${ct.text}`).join('\n\n');
-
-      if (combinedText.trim().length === 0) {
+      if (combinedText.length === 0) {
         form.setValues({
           error: '選択された目次のテキストが見つかりませんでした。',
           downloading: false
@@ -219,16 +227,46 @@ export default function Home() {
         return;
       }
 
-      const blob = new Blob([combinedText.trim()], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
       const fileName = form.values.selectedFile?.name?.replace(/\.epub$/i, '') || 'content';
-      link.download = `${fileName}.txt`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      downloadTextFile(`${fileName}.txt`, combinedText);
+    } catch (e) {
+      console.error('Download error:', e);
+      form.setFieldValue('error', 'テキストのダウンロード中にエラーが発生しました。');
+    } finally {
+      form.setFieldValue('downloading', false);
+    }
+  };
+
+  const handleDownloadPerChapter = async () => {
+    if (!epubInstance.current || form.values.selectedTocIds.length === 0) return;
+
+    form.setFieldValue('downloading', true);
+    form.setFieldValue('error', null);
+
+    try {
+      const epub = epubInstance.current;
+      if (!epub) return;
+
+      const chapterTexts = await extractSelectedChapterTexts(epub, form.values.selectedTocIds);
+      const nonEmptyChapters = chapterTexts
+        .map((ct) => ({ title: ct.title, text: ct.text.trim() }))
+        .filter((ct) => ct.text.length > 0);
+
+      if (nonEmptyChapters.length === 0) {
+        form.setValues({
+          error: '選択された目次のテキストが見つかりませんでした。',
+          downloading: false
+        });
+        return;
+      }
+
+      const baseName = form.values.selectedFile?.name?.replace(/\.epub$/i, '') || 'content';
+
+      for (const [index, chapter] of nonEmptyChapters.entries()) {
+        const chapterNumber = String(index + 1).padStart(2, '0');
+        const safeTitle = sanitizeFileName(chapter.title);
+        downloadTextFile(`${baseName}_${chapterNumber}_${safeTitle}.txt`, chapter.text);
+      }
     } catch (e) {
       console.error('Download error:', e);
       form.setFieldValue('error', 'テキストのダウンロード中にエラーが発生しました。');
@@ -239,7 +277,7 @@ export default function Home() {
 
   return (
     <Container maw={600} py={'xl'}>
-      <Stack gap={'md'}>
+      <Stack gap={'md'} mb={'xl'}>
         <Stack gap={'xs'}>
           <Title order={2}>EPUBテキスト変換ツール</Title>
           <Title order={6} c={'dimmed'}>
@@ -284,16 +322,26 @@ export default function Home() {
                 </List>
               </Checkbox.Group>
 
-              <Flex justify='center' align='center'>
+              <Stack align='center' gap={'xs'}>
                 <Button
                   onClick={handleDownload}
                   disabled={form.values.selectedTocIds.length === 0 || form.values.downloading}
-                  leftSection={<IconDownload size={18} />}
+                  leftSection={<IconDownload size={20} />}
                   loading={form.values.downloading}
+                  size='lg'
                 >
                   選択したテキストをダウンロード
                 </Button>
-              </Flex>
+                <Button
+                  onClick={handleDownloadPerChapter}
+                  disabled={form.values.selectedTocIds.length === 0 || form.values.downloading}
+                  variant='light'
+                  leftSection={<IconDownload size={20} />}
+                  size='lg'
+                >
+                  選択した章を個別に一括ダウンロード（複数txt）
+                </Button>
+              </Stack>
             </Stack>
           </FormProvider>
         )}

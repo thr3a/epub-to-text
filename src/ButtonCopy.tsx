@@ -6,13 +6,7 @@ import { IconCheck, IconCopy } from '@tabler/icons-react';
 // <ButtonCopy content='内容' label='コピー' />
 // <ButtonCopy content='内容' /> でアイコンのみ
 
-export function ButtonCopy({
-  content,
-  label
-}: {
-  content: string;
-  label?: string;
-}) {
+export function ButtonCopy({ content, label }: { content: string; label?: string }) {
   const clipboard = useClipboard({ timeout: 500 });
   const icon = clipboard.copied ? <IconCheck size={20} stroke={1.5} /> : <IconCopy size={20} stroke={1.5} />;
 

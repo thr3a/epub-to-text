@@ -9,7 +9,7 @@ import {
   List,
   ListItem,
   Loader,
-  Space,
+  Stack,
   Title
 } from '@mantine/core';
 import { createFormContext } from '@mantine/form';
@@ -37,7 +37,7 @@ window.process.cwd = () => '/';
 
 function Notice() {
   return (
-    <Alert variant='light' color='blue' title='安心設計' mb={'md'}>
+    <Alert variant='light' color='blue' title='安心設計'>
       EPUBのパース処理はすべてブラウザ内のみで行われます。 選択したファイルが外部に送信されることは一切ありません。
     </Alert>
   );
@@ -238,68 +238,66 @@ export default function Home() {
   };
 
   return (
-    <Container maw={600} mb={'xl'}>
-      <Title mt={'sm'} order={2}>
-        EPUBテキスト変換ツール
-      </Title>
-      <Title order={6} mb={'sm'} c={'dimmed'}>
-        EPUBのテキストを章ごとにまとめてダウンロードできます。
-      </Title>
+    <Container maw={600} py={'xl'}>
+      <Stack gap={'md'}>
+        <Stack gap={'xs'}>
+          <Title order={2}>EPUBテキスト変換ツール</Title>
+          <Title order={6} c={'dimmed'}>
+            EPUBのテキストを章ごとにまとめてダウンロードできます。
+          </Title>
+        </Stack>
 
-      <Notice />
+        <Notice />
 
-      <FileInput
-        label='EPUBファイルを選択'
-        placeholder='ここをクリックしてファイルを選択'
-        accept='.epub'
-        value={form.values.selectedFile}
-        onChange={handleFileChange}
-        clearable
-      />
-      <Space h='md' />
-      {form.values.loading && <Loader />}
-      {form.values.error && (
-        <Alert icon={<IconAlertCircle />} title='エラー' color='red'>
-          {form.values.error}
-        </Alert>
-      )}
-      <Space h='md' />
+        <FileInput
+          label='EPUBファイルを選択'
+          placeholder='ここをクリックしてファイルを選択'
+          accept='.epub'
+          value={form.values.selectedFile}
+          onChange={handleFileChange}
+          clearable
+        />
+        {form.values.loading && <Loader />}
+        {form.values.error && (
+          <Alert icon={<IconAlertCircle />} title='エラー' color='red'>
+            {form.values.error}
+          </Alert>
+        )}
 
-      {form.values.toc.length > 0 && !form.values.loading && (
-        <FormProvider form={form}>
-          <Flex justify='space-between'>
-            <Title order={4}>目次</Title>
-            <Button size='xs' variant='light' onClick={handleToggleAll}>
-              {form.values.selectedTocIds.length === form.values.toc.length ? '全解除' : '全選択'}
-            </Button>
-          </Flex>
+        {form.values.toc.length > 0 && !form.values.loading && (
+          <FormProvider form={form}>
+            <Stack gap={'md'}>
+              <Flex justify='space-between'>
+                <Title order={4}>目次</Title>
+                <Button size='xs' variant='light' onClick={handleToggleAll}>
+                  {form.values.selectedTocIds.length === form.values.toc.length ? '全解除' : '全選択'}
+                </Button>
+              </Flex>
 
-          <Space h='sm' />
+              <Checkbox.Group {...form.getInputProps('selectedTocIds')}>
+                <List spacing='xs' size='sm' listStyleType='none'>
+                  {form.values.toc.map((item: TocItem) => (
+                    <ListItem key={item.id}>
+                      <Checkbox value={item.id} label={item.label} />
+                    </ListItem>
+                  ))}
+                </List>
+              </Checkbox.Group>
 
-          <Checkbox.Group {...form.getInputProps('selectedTocIds')}>
-            <List spacing='xs' size='sm' listStyleType='none'>
-              {form.values.toc.map((item: TocItem) => (
-                <ListItem key={item.id}>
-                  <Checkbox value={item.id} label={item.label} />
-                </ListItem>
-              ))}
-            </List>
-          </Checkbox.Group>
-
-          <Space h='md' />
-
-          <Flex justify='center' align='center'>
-            <Button
-              onClick={handleDownload}
-              disabled={form.values.selectedTocIds.length === 0 || form.values.downloading}
-              leftSection={<IconDownload size={18} />}
-              loading={form.values.downloading}
-            >
-              選択したテキストをダウンロード
-            </Button>
-          </Flex>
-        </FormProvider>
-      )}
+              <Flex justify='center' align='center'>
+                <Button
+                  onClick={handleDownload}
+                  disabled={form.values.selectedTocIds.length === 0 || form.values.downloading}
+                  leftSection={<IconDownload size={18} />}
+                  loading={form.values.downloading}
+                >
+                  選択したテキストをダウンロード
+                </Button>
+              </Flex>
+            </Stack>
+          </FormProvider>
+        )}
+      </Stack>
     </Container>
   );
 }

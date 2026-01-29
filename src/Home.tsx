@@ -37,8 +37,8 @@ window.process.cwd = () => '/';
 
 function Notice() {
   return (
-    <Alert variant='light' color='blue' title='ご安心ください' mb={'md'}>
-      EPUBのロード処理はすべてブラウザ内のみで行われます。 選択したファイルが外部に送信されることはありません。
+    <Alert variant='light' color='blue' title='安心設計' mb={'md'}>
+      EPUBのパース処理はすべてブラウザ内のみで行われます。 選択したファイルが外部に送信されることは一切ありません。
     </Alert>
   );
 }

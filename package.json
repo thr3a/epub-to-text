@@ -12,7 +12,7 @@
     "llmtext": "docker run --rm -v ./:/app thr3a/repo2text -d /app -f package.json vite.config.ts"
   },
   "dependencies": {
-    "@lingo-reader/epub-parser": "^0.2.5",
+    "@lingo-reader/epub-parser": "^0.4.5",
     "@mantine/core": "7.17.4",
     "@mantine/form": "^7.17.7",
     "@mantine/hooks": "7.17.4",
@@ -25,7 +25,7 @@
     "tsx": "^4.19.4"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.3.13",
     "@types/react": "^19.1.4",
     "@types/react-dom": "^19.1.5",
     "@vanilla-extract/vite-plugin": "^5.0.2",

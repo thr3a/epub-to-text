@@ -18,6 +18,7 @@ import {
 import { createFormContext } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { IconAlertCircle, IconChevronDown, IconChevronRight, IconDownload } from '@tabler/icons-react';
+import { strToU8, zipSync } from 'fflate';
 import { type ChangeEvent, useEffect, useRef } from 'react';
 import {
   buildTocGroups,
@@ -44,8 +45,7 @@ const [FormProvider, _useFormContext, useForm] = createFormContext<FormProps>();
 window.process = window.process || {};
 window.process.cwd = () => '/';
 
-const downloadTextFile = (fileName: string, content: string) => {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+const downloadBlob = (fileName: string, blob: Blob) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -54,6 +54,18 @@ const downloadTextFile = (fileName: string, content: string) => {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+};
+
+const downloadTextFile = (fileName: string, content: string) => {
+  downloadBlob(fileName, new Blob([content], { type: 'text/plain;charset=utf-8' }));
+};
+
+const downloadZipFile = (fileName: string, files: Record<string, string>) => {
+  const zipEntries: Record<string, Uint8Array> = {};
+  for (const [name, content] of Object.entries(files)) {
+    zipEntries[name] = strToU8(content);
+  }
+  downloadBlob(fileName, new Blob([zipSync(zipEntries)], { type: 'application/zip' }));
 };
 
 // 大項目1行分。配下の目次項目は折りたたんで表示のみ（選択は大項目単位）
@@ -276,14 +288,18 @@ export default function Home() {
 
       // 並び順が崩れないよう、目次全体での大項目の位置を連番として先頭に付ける
       const numberWidth = Math.max(2, String(tocGroups.length).length);
+      const files: Record<string, string> = {};
       for (const groupText of groupTexts) {
         const number = String(tocGroups.findIndex((group) => group.key === groupText.key) + 1).padStart(
           numberWidth,
           '0'
         );
         const safeTitle = sanitizeFileName(groupText.title);
-        downloadTextFile(`${number}_${safeTitle}.txt`, combineChapterTexts(groupText.chapterTexts));
+        files[`${number}_${safeTitle}.txt`] = combineChapterTexts(groupText.chapterTexts);
       }
+
+      const fileName = form.values.selectedFile?.name?.replace(/\.epub$/i, '') || 'content';
+      downloadZipFile(`${fileName}.zip`, files);
     } catch (e) {
       console.error('Download error:', e);
       form.setFieldValue('error', 'テキストのダウンロード中にエラーが発生しました。');
@@ -363,7 +379,7 @@ export default function Home() {
                   leftSection={<IconDownload size={20} />}
                   size='lg'
                 >
-                  選択した章を個別に一括ダウンロード（複数txt）
+                  章ごとに分割して一括ダウンロード(Zip)
                 </Button>
               </Stack>
             </Stack>

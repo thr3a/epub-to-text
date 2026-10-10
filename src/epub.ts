@@ -7,6 +7,11 @@ type NavPoint = ReturnType<EpubInstance['getToc']>[number];
 // key は目次の並び順から作る一意な値（同一ファイル内アンカーの項目は id が重複するため）
 export type TocItem = NavPoint & { depth: number; key: string };
 export type ChapterText = { title: string; text: string };
+// 選択の単位となる大項目。key は大項目自身の TocItem の key、children は配下の目次項目（文書順）
+export type TocGroup = { key: string; label: string; depth: number; children: TocItem[] };
+// 大項目ごとのテキスト。chapterTexts は大項目自身と配下の目次項目のうち本文があるもの
+export type GroupText = { key: string; title: string; chapterTexts: ChapterText[] };
+type KeyedChapterText = ChapterText & { key: string };
 
 export const sanitizeFileName = (value: string): string => {
   const trimmed = value.trim();
@@ -24,6 +29,30 @@ const flattenToc = (items: NavPoint[], depth = 0): Omit<TocItem, 'key'>[] =>
 export const buildTocItems = (toc: NavPoint[]): TocItem[] =>
   flattenToc(toc).map((item, index) => ({ ...item, key: String(index) }));
 
+// 大項目とみなす階層。トップレベルが1件だけ（本のタイトルなど）で配下がある場合は1段下を大項目にする
+const getGroupDepth = (tocItems: TocItem[]): number => {
+  const topLevelCount = tocItems.filter((item) => item.depth === 0).length;
+  const hasNested = tocItems.some((item) => item.depth > 0);
+  return topLevelCount === 1 && hasNested ? 1 : 0;
+};
+
+// 平坦化した目次を大項目ごとにまとめる。大項目より浅い項目（本のタイトルなど）は含めない
+export const buildTocGroups = (tocItems: TocItem[]): TocGroup[] => {
+  const groupDepth = getGroupDepth(tocItems);
+  const groups: TocGroup[] = [];
+  for (const item of tocItems) {
+    if (item.depth < groupDepth) continue;
+    if (item.depth === groupDepth) {
+      groups.push({ key: item.key, label: item.label.trim(), depth: item.depth, children: [] });
+      continue;
+    }
+    groups.at(-1)?.children.push(item);
+  }
+  return groups;
+};
+
+const groupItemKeys = (group: TocGroup): string[] => [group.key, ...group.children.map((child) => child.key)];
+
 // href の # 以降（アンカー）を取り出す。無ければ null
 export const getAnchor = (href: string): string | null => {
   const hashIndex = href.indexOf('#');
@@ -32,10 +61,7 @@ export const getAnchor = (href: string): string | null => {
   return anchor.length > 0 ? anchor : null;
 };
 
-export const extractSelectedChapterTexts = async (
-  epub: EpubInstance,
-  selectedTocKeys: string[]
-): Promise<ChapterText[]> => {
+const extractKeyedChapterTexts = async (epub: EpubInstance, selectedTocKeys: string[]): Promise<KeyedChapterText[]> => {
   const parser = new DOMParser();
   const spine = epub.getSpine();
   const tocItems = buildTocItems(epub.getToc());
@@ -48,9 +74,9 @@ export const extractSelectedChapterTexts = async (
     tocItemsBySpineId.set(item.id, [...(tocItemsBySpineId.get(item.id) ?? []), item]);
   }
 
-  const chapterTexts: ChapterText[] = [];
+  const chapterTexts: KeyedChapterText[] = [];
   // 現在読み進めている目次項目の章（目次に到達する前は null）
-  let currentChapter: { title: string; selected: boolean; text: string } | null = null;
+  let currentChapter: { key: string; title: string; selected: boolean; text: string } | null = null;
 
   const appendText = (text: string) => {
     const trimmed = text.trim();
@@ -62,7 +88,7 @@ export const extractSelectedChapterTexts = async (
     if (!currentChapter?.selected) return;
     const text = currentChapter.text.trim();
     if (text.length === 0) return;
-    chapterTexts.push({ title: currentChapter.title, text });
+    chapterTexts.push({ key: currentChapter.key, title: currentChapter.title, text });
   };
 
   for (const spineItem of spine) {
@@ -106,7 +132,7 @@ export const extractSelectedChapterTexts = async (
 
     for (const [index, { item, element }] of starts.entries()) {
       flushChapter();
-      currentChapter = { title: item.label.trim(), selected: selectedKeySet.has(item.key), text: '' };
+      currentChapter = { key: item.key, title: item.label.trim(), selected: selectedKeySet.has(item.key), text: '' };
       appendText(textBetween(element, starts[index + 1]?.element ?? null));
     }
   }
@@ -114,6 +140,33 @@ export const extractSelectedChapterTexts = async (
   flushChapter();
 
   return chapterTexts;
+};
+
+export const extractSelectedChapterTexts = async (
+  epub: EpubInstance,
+  selectedTocKeys: string[]
+): Promise<ChapterText[]> =>
+  (await extractKeyedChapterTexts(epub, selectedTocKeys)).map(({ title, text }) => ({ title, text }));
+
+// 選択した大項目ごとに、配下を含むテキストを取り出す。本文が無い大項目は含めない
+export const extractSelectedGroupTexts = async (
+  epub: EpubInstance,
+  groups: TocGroup[],
+  selectedGroupKeys: string[]
+): Promise<GroupText[]> => {
+  const selectedGroupKeySet = new Set(selectedGroupKeys);
+  const selectedGroups = groups.filter((group) => selectedGroupKeySet.has(group.key));
+  const keyedTexts = await extractKeyedChapterTexts(epub, selectedGroups.flatMap(groupItemKeys));
+
+  return selectedGroups
+    .map((group) => {
+      const itemKeySet = new Set(groupItemKeys(group));
+      const chapterTexts = keyedTexts
+        .filter((ct) => itemKeySet.has(ct.key))
+        .map(({ title, text }) => ({ title, text }));
+      return { key: group.key, title: group.label, chapterTexts };
+    })
+    .filter((groupText) => groupText.chapterTexts.length > 0);
 };
 
 // 章ごとのテキストを見出し付きで1つのテキストにまとめる

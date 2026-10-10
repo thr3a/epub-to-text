@@ -4,10 +4,12 @@ import { join } from 'node:path';
 import { initEpubFile } from '@lingo-reader/epub-parser';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import {
+  buildTocGroups,
   buildTocItems,
   combineChapterTexts,
   type EpubInstance,
   extractSelectedChapterTexts,
+  extractSelectedGroupTexts,
   getAnchor,
   sanitizeFileName
 } from './epub';
@@ -235,6 +237,89 @@ describe('extractSelectedChapterTexts', () => {
     const chapterTexts = await extractSelectedChapterTexts(epub, allKeysOf(epub));
 
     expect(chapterTexts.map((ct) => ct.title)).toEqual(['第1章']);
+  });
+});
+
+describe('buildTocGroups', () => {
+  test('トップレベルの項目を大項目とし、配下の項目を children にまとめる', async () => {
+    const epub = await openEpub(sampleChapters, sampleToc);
+    const groups = buildTocGroups(buildTocItems(epub.getToc()));
+
+    expect(groups.map(({ key, label, children }) => ({ key, label, children: children.map((c) => c.label) }))).toEqual([
+      { key: '0', label: '第1章', children: [] },
+      { key: '1', label: '第2章', children: ['2.1 節その1', '2.2 節その2'] },
+      { key: '4', label: '第3章', children: [] }
+    ]);
+  });
+
+  test('トップレベルが1件だけで配下がある場合は、1段下を大項目にする', async () => {
+    const epub = await openEpub(sampleChapters, [
+      { label: '本のタイトル', src: 'text/ch1.xhtml', children: sampleToc }
+    ]);
+    const groups = buildTocGroups(buildTocItems(epub.getToc()));
+
+    expect(groups.map(({ label, children }) => ({ label, children: children.map((c) => c.label) }))).toEqual([
+      { label: '第1章', children: [] },
+      { label: '第2章', children: ['2.1 節その1', '2.2 節その2'] },
+      { label: '第3章', children: [] }
+    ]);
+  });
+
+  test('トップレベルが1件だけで配下が無い場合は、その項目を大項目にする', async () => {
+    const epub = await openEpub(
+      [{ id: 'ch1', href: 'ch1.xhtml', body: '<p>本文</p>' }],
+      [{ label: '第1章', src: 'ch1.xhtml' }]
+    );
+
+    expect(buildTocGroups(buildTocItems(epub.getToc())).map((g) => g.label)).toEqual(['第1章']);
+  });
+});
+
+describe('extractSelectedGroupTexts', () => {
+  test('大項目を選ぶと配下の項目のテキストもまとめて返る', async () => {
+    const epub = await openEpub(sampleChapters, sampleToc);
+    const groups = buildTocGroups(buildTocItems(epub.getToc()));
+    const groupTexts = await extractSelectedGroupTexts(epub, groups, keysOf(epub, ['第2章']));
+
+    expect(groupTexts).toEqual([
+      {
+        key: '1',
+        title: '第2章',
+        chapterTexts: [
+          { title: '第2章', text: '第2章 なかほど第2章の導入。' },
+          { title: '2.1 節その1', text: '2.1 節その1節その1の本文。' },
+          {
+            title: '2.2 節その2',
+            text: '2.2 節その2節その2の本文。\n目次に無いファイルの本文。\nアンカー前の本文。'
+          }
+        ]
+      }
+    ]);
+  });
+
+  test('選択順に関係なく目次順で返り、未選択の大項目は含まれない', async () => {
+    const epub = await openEpub(sampleChapters, sampleToc);
+    const groups = buildTocGroups(buildTocItems(epub.getToc()));
+    const groupTexts = await extractSelectedGroupTexts(epub, groups, keysOf(epub, ['第3章', '第1章']));
+
+    expect(groupTexts.map((gt) => gt.title)).toEqual(['第1章', '第3章']);
+  });
+
+  test('本文が無い大項目は含まれない', async () => {
+    const epub = await openEpub(
+      [
+        { id: 'empty', href: 'empty.xhtml', body: '<div>   </div>' },
+        { id: 'ch1', href: 'ch1.xhtml', body: '<p>本文</p>' }
+      ],
+      [
+        { label: '空の章', src: 'empty.xhtml' },
+        { label: '第1章', src: 'ch1.xhtml' }
+      ]
+    );
+    const groups = buildTocGroups(buildTocItems(epub.getToc()));
+    const groupTexts = await extractSelectedGroupTexts(epub, groups, allKeysOf(epub));
+
+    expect(groupTexts.map((gt) => gt.title)).toEqual(['第1章']);
   });
 });
 

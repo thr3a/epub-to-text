@@ -18,7 +18,9 @@ import { useEffect, useRef } from 'react';
 
 // Epub型をinitEpubFileの返り値の型として定義
 type EpubInstance = Awaited<ReturnType<typeof initEpubFile>>;
-type TocItem = ReturnType<EpubInstance['getToc']>[number];
+type NavPoint = ReturnType<EpubInstance['getToc']>[number];
+// 入れ子の目次を平坦化した項目。depth は階層の深さ（最上位が0）
+type TocItem = NavPoint & { depth: number };
 type ChapterText = { title: string; text: string };
 
 // Mantine form context
@@ -44,6 +46,10 @@ const sanitizeFileName = (value: string): string => {
     .replace(/\s+/g, ' ')
     .slice(0, 120);
 };
+
+// 入れ子の目次（children）を再帰的に平坦化する
+const flattenToc = (items: NavPoint[], depth = 0): TocItem[] =>
+  items.flatMap((item) => [{ ...item, depth }, ...flattenToc(item.children ?? [], depth + 1)]);
 
 const downloadTextFile = (fileName: string, content: string) => {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -117,7 +123,7 @@ export default function Home() {
     try {
       const newEpubInstance = await initEpubFile(file);
       epubInstance.current = newEpubInstance;
-      const tocItems = newEpubInstance.getToc();
+      const tocItems = flattenToc(newEpubInstance.getToc());
       form.setValues({
         toc: tocItems,
         selectedTocIds: tocItems.map((item) => item.id)
@@ -151,7 +157,7 @@ export default function Home() {
   const extractSelectedChapterTexts = async (epub: EpubInstance, selectedTocIds: string[]) => {
     const parser = new DOMParser();
     const spine = epub.getSpine();
-    const tocItems = epub.getToc();
+    const tocItems = flattenToc(epub.getToc());
     const tocMap = new Map(tocItems.map((item) => [item.id, item]));
 
     const htmlToText = (html: string): string => {
@@ -312,7 +318,7 @@ export default function Home() {
               <Checkbox.Group {...form.getInputProps('selectedTocIds')}>
                 <List spacing='xs' size='sm' listStyleType='none'>
                   {form.values.toc.map((item: TocItem) => (
-                    <ListItem key={item.id}>
+                    <ListItem key={item.id} pl={item.depth * 20}>
                       <Checkbox value={item.id} label={item.label} />
                     </ListItem>
                   ))}

@@ -260,12 +260,9 @@ export default function Home() {
         return;
       }
 
-      const baseName = form.values.selectedFile?.name?.replace(/\.epub$/i, '') || 'content';
-
-      for (const [index, chapter] of nonEmptyChapters.entries()) {
-        const chapterNumber = String(index + 1).padStart(2, '0');
+      for (const chapter of nonEmptyChapters) {
         const safeTitle = sanitizeFileName(chapter.title);
-        downloadTextFile(`${baseName}_${chapterNumber}_${safeTitle}.txt`, chapter.text);
+        downloadTextFile(`${safeTitle}.txt`, chapter.text);
       }
     } catch (e) {
       console.error('Download error:', e);

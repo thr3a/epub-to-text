@@ -20,14 +20,15 @@ import { useEffect, useRef } from 'react';
 type EpubInstance = Awaited<ReturnType<typeof initEpubFile>>;
 type NavPoint = ReturnType<EpubInstance['getToc']>[number];
 // 入れ子の目次を平坦化した項目。depth は階層の深さ（最上位が0）
-type TocItem = NavPoint & { depth: number };
+// key は目次の並び順から作る一意な値（同一ファイル内アンカーの項目は id が重複するため）
+type TocItem = NavPoint & { depth: number; key: string };
 type ChapterText = { title: string; text: string };
 
 // Mantine form context
 type FormProps = {
   selectedFile: File | null;
   toc: TocItem[];
-  selectedTocIds: string[];
+  selectedTocKeys: string[];
   loading: boolean;
   error: string | null;
   downloading: boolean;
@@ -48,8 +49,19 @@ const sanitizeFileName = (value: string): string => {
 };
 
 // 入れ子の目次（children）を再帰的に平坦化する
-const flattenToc = (items: NavPoint[], depth = 0): TocItem[] =>
+const flattenToc = (items: NavPoint[], depth = 0): Omit<TocItem, 'key'>[] =>
   items.flatMap((item) => [{ ...item, depth }, ...flattenToc(item.children ?? [], depth + 1)]);
+
+const buildTocItems = (toc: NavPoint[]): TocItem[] =>
+  flattenToc(toc).map((item, index) => ({ ...item, key: String(index) }));
+
+// href の # 以降（アンカー）を取り出す。無ければ null
+const getAnchor = (href: string): string | null => {
+  const hashIndex = href.indexOf('#');
+  if (hashIndex === -1) return null;
+  const anchor = href.slice(hashIndex + 1);
+  return anchor.length > 0 ? anchor : null;
+};
 
 const downloadTextFile = (fileName: string, content: string) => {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -81,7 +93,7 @@ export default function Home() {
     initialValues: {
       selectedFile: null,
       toc: [],
-      selectedTocIds: [],
+      selectedTocKeys: [],
       loading: false,
       error: null,
       downloading: false
@@ -99,7 +111,7 @@ export default function Home() {
   const handleFileChange = async (file: File | null) => {
     form.setValues({
       selectedFile: file,
-      selectedTocIds: []
+      selectedTocKeys: []
     });
     if (epubInstance.current) {
       epubInstance.current.destroy();
@@ -123,17 +135,17 @@ export default function Home() {
     try {
       const newEpubInstance = await initEpubFile(file);
       epubInstance.current = newEpubInstance;
-      const tocItems = flattenToc(newEpubInstance.getToc());
+      const tocItems = buildTocItems(newEpubInstance.getToc());
       form.setValues({
         toc: tocItems,
-        selectedTocIds: tocItems.map((item) => item.id)
+        selectedTocKeys: tocItems.map((item) => item.key)
       });
     } catch (e) {
       console.error('EPUB parsing error:', e);
       form.setValues({
         error: 'EPUBファイルのロードに失敗しました。',
         toc: [],
-        selectedTocIds: []
+        selectedTocKeys: []
       });
       epubInstance.current = null;
     } finally {
@@ -144,73 +156,99 @@ export default function Home() {
   // 一括ON/OFF
   const handleToggleAll = () => {
     const toc = form.values.toc;
-    if (form.values.selectedTocIds.length === toc.length) {
-      form.setFieldValue('selectedTocIds', []);
+    if (form.values.selectedTocKeys.length === toc.length) {
+      form.setFieldValue('selectedTocKeys', []);
     } else {
       form.setFieldValue(
-        'selectedTocIds',
-        toc.map((item) => item.id)
+        'selectedTocKeys',
+        toc.map((item) => item.key)
       );
     }
   };
 
-  const extractSelectedChapterTexts = async (epub: EpubInstance, selectedTocIds: string[]) => {
+  const extractSelectedChapterTexts = async (epub: EpubInstance, selectedTocKeys: string[]) => {
     const parser = new DOMParser();
     const spine = epub.getSpine();
-    const tocItems = flattenToc(epub.getToc());
-    const tocMap = new Map(tocItems.map((item) => [item.id, item]));
+    const tocItems = buildTocItems(epub.getToc());
+    const selectedKeySet = new Set(selectedTocKeys);
 
-    const htmlToText = (html: string): string => {
-      const doc = parser.parseFromString(html, 'text/html');
-      return doc.body.textContent?.trim() || '';
-    };
+    // spine の id ごとに、そのファイルを指す目次項目をまとめる
+    const tocItemsBySpineId = new Map<string, TocItem[]>();
+    for (const item of tocItems) {
+      if (!item.id) continue;
+      tocItemsBySpineId.set(item.id, [...(tocItemsBySpineId.get(item.id) ?? []), item]);
+    }
 
     const chapterTexts: ChapterText[] = [];
+    // 現在読み進めている目次項目の章（目次に到達する前は null）
+    let currentChapter: { title: string; selected: boolean; text: string } | null = null;
 
-    let currentSelectedChapterTitle: string | null = null;
-    let currentChapterAggregatedText = '';
+    const appendText = (text: string) => {
+      const trimmed = text.trim();
+      if (!currentChapter?.selected || trimmed.length === 0) return;
+      currentChapter.text += `${trimmed}\n`;
+    };
+
+    const flushChapter = () => {
+      if (!currentChapter?.selected) return;
+      const text = currentChapter.text.trim();
+      if (text.length === 0) return;
+      chapterTexts.push({ title: currentChapter.title, text });
+    };
 
     for (const spineItem of spine) {
-      const tocItemForSpine = tocMap.get(spineItem.id);
-      const chapterTitle = tocItemForSpine?.label?.trim();
-
-      if (chapterTitle && selectedTocIds.includes(spineItem.id)) {
-        if (currentSelectedChapterTitle && currentChapterAggregatedText.trim().length > 0) {
-          chapterTexts.push({ title: currentSelectedChapterTitle, text: currentChapterAggregatedText.trim() });
-        }
-        currentSelectedChapterTitle = chapterTitle;
-        const chapterData = await epub.loadChapter(spineItem.id);
-        currentChapterAggregatedText = chapterData?.html ? `${htmlToText(chapterData.html)}\n` : '';
-        continue;
-      }
-
-      if (!currentSelectedChapterTitle) continue;
-
-      if (chapterTitle && chapterTitle !== currentSelectedChapterTitle && !selectedTocIds.includes(spineItem.id)) {
-        if (currentChapterAggregatedText.trim().length > 0) {
-          chapterTexts.push({ title: currentSelectedChapterTitle, text: currentChapterAggregatedText.trim() });
-        }
-        currentSelectedChapterTitle = null;
-        currentChapterAggregatedText = '';
-        continue;
-      }
+      const itemsInFile = tocItemsBySpineId.get(spineItem.id) ?? [];
+      // 目次に無いファイルで、かつ未選択の章の途中なら読み込み不要
+      if (itemsInFile.length === 0 && !currentChapter?.selected) continue;
 
       const chapterData = await epub.loadChapter(spineItem.id);
-      if (!chapterData?.html) continue;
-      const text = htmlToText(chapterData.html);
-      if (text.length === 0) continue;
-      currentChapterAggregatedText += `${text}\n`;
+      const doc = parser.parseFromString(chapterData?.html ?? '', 'text/html');
+
+      // 各目次項目の開始位置（アンカー要素。見つからなければファイル先頭）を文書順に並べる
+      const starts = itemsInFile
+        .map((item) => {
+          const anchor = getAnchor(item.href);
+          return { item, element: anchor ? doc.getElementById(anchor) : null };
+        })
+        .sort((a, b) => {
+          if (!a.element) return b.element ? -1 : 0;
+          if (!b.element) return 1;
+          return a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+        });
+
+      // start から end（null ならファイル末尾）までのテキストを取り出す
+      const textBetween = (start: Element | null, end: Element | null): string => {
+        const range = doc.createRange();
+        range.selectNodeContents(doc.body);
+        if (start) range.setStartBefore(start);
+        if (end) range.setEndBefore(end);
+        return range.toString();
+      };
+
+      // 目次項目が無いファイルは丸ごと、直前の章の続き
+      if (starts.length === 0) {
+        appendText(textBetween(null, null));
+        continue;
+      }
+
+      // 最初の目次項目がアンカー指定なら、それより前の部分は直前の章の続き
+      const firstElement = starts[0].element;
+      if (firstElement) appendText(textBetween(null, firstElement));
+
+      for (const [index, { item, element }] of starts.entries()) {
+        flushChapter();
+        currentChapter = { title: item.label.trim(), selected: selectedKeySet.has(item.key), text: '' };
+        appendText(textBetween(element, starts[index + 1]?.element ?? null));
+      }
     }
 
-    if (currentSelectedChapterTitle && currentChapterAggregatedText.trim().length > 0) {
-      chapterTexts.push({ title: currentSelectedChapterTitle, text: currentChapterAggregatedText.trim() });
-    }
+    flushChapter();
 
     return chapterTexts;
   };
 
   const handleDownload = async () => {
-    if (!epubInstance.current || form.values.selectedTocIds.length === 0) return;
+    if (!epubInstance.current || form.values.selectedTocKeys.length === 0) return;
 
     form.setFieldValue('downloading', true);
     form.setFieldValue('error', null);
@@ -219,7 +257,7 @@ export default function Home() {
       const epub = epubInstance.current;
       if (!epub) return;
 
-      const chapterTexts = await extractSelectedChapterTexts(epub, form.values.selectedTocIds);
+      const chapterTexts = await extractSelectedChapterTexts(epub, form.values.selectedTocKeys);
       const combinedText = chapterTexts
         .map((ct) => `--- ${ct.title} ---\n${ct.text}`)
         .join('\n\n')
@@ -244,7 +282,7 @@ export default function Home() {
   };
 
   const handleDownloadPerChapter = async () => {
-    if (!epubInstance.current || form.values.selectedTocIds.length === 0) return;
+    if (!epubInstance.current || form.values.selectedTocKeys.length === 0) return;
 
     form.setFieldValue('downloading', true);
     form.setFieldValue('error', null);
@@ -253,7 +291,7 @@ export default function Home() {
       const epub = epubInstance.current;
       if (!epub) return;
 
-      const chapterTexts = await extractSelectedChapterTexts(epub, form.values.selectedTocIds);
+      const chapterTexts = await extractSelectedChapterTexts(epub, form.values.selectedTocKeys);
       const nonEmptyChapters = chapterTexts
         .map((ct) => ({ title: ct.title, text: ct.text.trim() }))
         .filter((ct) => ct.text.length > 0);
@@ -311,15 +349,15 @@ export default function Home() {
               <Flex justify='space-between'>
                 <Title order={4}>目次</Title>
                 <Button size='xs' variant='light' onClick={handleToggleAll}>
-                  {form.values.selectedTocIds.length === form.values.toc.length ? '全解除' : '全選択'}
+                  {form.values.selectedTocKeys.length === form.values.toc.length ? '全解除' : '全選択'}
                 </Button>
               </Flex>
 
-              <Checkbox.Group {...form.getInputProps('selectedTocIds')}>
+              <Checkbox.Group {...form.getInputProps('selectedTocKeys')}>
                 <List spacing='xs' size='sm' listStyleType='none'>
                   {form.values.toc.map((item: TocItem) => (
-                    <ListItem key={item.id} pl={item.depth * 20}>
-                      <Checkbox value={item.id} label={item.label} />
+                    <ListItem key={item.key} pl={item.depth * 20}>
+                      <Checkbox value={item.key} label={item.label} />
                     </ListItem>
                   ))}
                 </List>
@@ -328,7 +366,7 @@ export default function Home() {
               <Stack align='center' gap={'xs'}>
                 <Button
                   onClick={handleDownload}
-                  disabled={form.values.selectedTocIds.length === 0 || form.values.downloading}
+                  disabled={form.values.selectedTocKeys.length === 0 || form.values.downloading}
                   leftSection={<IconDownload size={20} />}
                   loading={form.values.downloading}
                   size='lg'
@@ -337,7 +375,7 @@ export default function Home() {
                 </Button>
                 <Button
                   onClick={handleDownloadPerChapter}
-                  disabled={form.values.selectedTocIds.length === 0 || form.values.downloading}
+                  disabled={form.values.selectedTocKeys.length === 0 || form.values.downloading}
                   variant='light'
                   leftSection={<IconDownload size={20} />}
                   size='lg'

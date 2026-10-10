@@ -9,7 +9,8 @@
     "lint": "biome check --write ./src",
     "preview": "vite preview",
     "serve": "python -m http.server -d dist",
-    "llmtext": "docker run --rm -v ./:/app thr3a/repo2text -d /app -f package.json vite.config.ts"
+    "llmtext": "docker run --rm -v ./:/app thr3a/repo2text -d /app -f package.json vite.config.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@lingo-reader/epub-parser": "^0.4.6",
@@ -30,10 +31,13 @@
     "@types/react-dom": "^19.1.5",
     "@vanilla-extract/vite-plugin": "^5.0.2",
     "@vitejs/plugin-react": "^4.4.1",
+    "fflate": "^0.8.3",
+    "jsdom": "^29.1.1",
     "postcss": "^8.5.3",
     "postcss-preset-mantine": "1.17.0",
     "postcss-simple-vars": "^7.0.1",
     "typescript": "^5.8.3",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vitest": "^3.2.7"
   }
 }

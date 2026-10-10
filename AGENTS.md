@@ -1,17 +1,13 @@
-# 1. 全体方針・コミュニケーション
+EPUB をブラウザ内だけでパースし、目次で選んだ章をテキスト（.txt）としてダウンロードする SPA。サーバー側処理は無い。
+`master` への push で GitHub Actions が `npm run build` し、GitHub Pages（`epub.turai.work`）へデプロイされる。
 
-- ユーザーは日本人です。
-  - 思考過程や途中経過の説明：英語
-  - コード内コメント・最終出力メッセージ・ユーザーへの質問：日本語
+# 全体方針・コミュニケーション
+
+- ユーザーは日本人です。コード内コメント・最終出力メッセージ・ユーザーへの質問は日本語でお願いします。
 - 既存のコードコメントは、明示的な指示がない限り変更しない。
-- AI のモデル名（例：`gpt-4o`）は、ユーザーから指示があるまで勝手に変更しない。
-- `npm run build` は実行しない。
-- https://deepwiki.com/mantinedev/mantine
-- `src/scripts` 以下の TypeScript コードを実行するときは、次のコマンドを使う：
-  - `node --import tsx ./src/scripts/hello.ts`
-- 特に指示がなければ、上記形式でのスクリプト実行は 自動で行ってよい。
+- `src/scripts` 以下の TypeScript コードを実行するときは `node --import tsx ./src/scripts/hello.ts`
 
-ライブラリ概要
+# ライブラリ概要
 
 - 言語: TypeScript
 - UIフレームワーク: React v19 + Mantine v7
@@ -19,7 +15,7 @@
 - ビルドツール: Vite
 - Lint: Biome
 
-# 2. TypeScript / コーディングスタイル
+# TypeScript / コーディングスタイル
 
 - 型定義は `interface` ではなく 必ず `type` を使う。
 - `any` 型は 絶対に使用しない。
@@ -51,59 +47,3 @@
 - 縦方向に要素が連続する場合、個々に `mb` を多用せず、基本的に `<Stack>` を使って縦間隔を調整する。
 - 文字の太さ（`fw`）は `"bold"` のみ使用可能。数値（`400`, `700` など）は使用しない。
 - fetchする場合は必ず `use-fetch` を使う。
-
-# 4. Mantine で使用可能な Style props 一覧
-
-All Mantine components that have root element support the following style props:
-
-| Prop    | CSS Property         | Theme key         |
-| ------- | -------------------- | ----------------- |
-| m       | margin               | theme.spacing     |
-| mt      | marginTop            | theme.spacing     |
-| mb      | marginBottom         | theme.spacing     |
-| ml      | marginLeft           | theme.spacing     |
-| mr      | marginRight          | theme.spacing     |
-| ms      | marginInlineStart    | theme.spacing     |
-| me      | marginInlineEnd      | theme.spacing     |
-| mx      | marginInline         | theme.spacing     |
-| my      | marginBlock          | theme.spacing     |
-| p       | padding              | theme.spacing     |
-| pt      | paddingTop           | theme.spacing     |
-| pb      | paddingBottom        | theme.spacing     |
-| pl      | paddingLeft          | theme.spacing     |
-| pr      | paddingRight         | theme.spacing     |
-| ps      | paddingInlineStart   | theme.spacing     |
-| pe      | paddingInlineEnd     | theme.spacing     |
-| px      | paddingInline        | theme.spacing     |
-| py      | paddingBlock         | theme.spacing     |
-| bd      | border               | –                 |
-| bg      | background           | theme.colors      |
-| c       | color                | –                 |
-| opacity | opacity              | –                 |
-| ff      | fontFamily           | –                 |
-| fz      | fontSize             | theme.fontSizes   |
-| fw      | fontWeight           | –                 |
-| lts     | letterSpacing        | –                 |
-| ta      | textAlign            | –                 |
-| lh      | lineHeight           | theme.lineHeights |
-| fs      | fontStyle            | –                 |
-| tt      | textTransform        | –                 |
-| td      | textDecoration       | –                 |
-| w       | width                | theme.spacing     |
-| miw     | minWidth             | theme.spacing     |
-| maw     | maxWidth             | theme.spacing     |
-| h       | height               | theme.spacing     |
-| mih     | minHeight            | theme.spacing     |
-| mah     | maxHeight            | theme.spacing     |
-| bgsz    | backgroundSize       | –                 |
-| bgp     | backgroundPosition   | –                 |
-| bgr     | backgroundRepeat     | –                 |
-| bga     | backgroundAttachment | –                 |
-| pos     | position             | –                 |
-| top     | top                  | –                 |
-| left    | left                 | –                 |
-| bottom  | bottom               | –                 |
-| right   | right                | –                 |
-| inset   | inset                | –                 |
-| display | display              | –                 |
-| flex    | flex                 | –                 |
